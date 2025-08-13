@@ -67,7 +67,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, onSnapshot, collection, addDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, onSnapshot, collection, addDoc, doc, deleteDoc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // This function displays a temporary message box.
         window.showMessage = function(text, type = 'info', duration = 3000) {
@@ -91,25 +91,44 @@
         // Setup Firebase connection and authentication.
         async function setupFirebase() {
             try {
-                // Use global variables provided by the environment
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const firebaseConfig = JSON.parse(__firebase_config);
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                // Configuración manual de Firebase proporcionada por el usuario
+                const firebaseConfigManual = {
+                  apiKey: "AIzaSyAVgge01JkLire7Ej5u8-FnCZ4Qb3OwxYU",
+                  authDomain: "pizarra-colaborativa-ce80e.firebaseapp.com",
+                  projectId: "pizarra-colaborativa-ce80e",
+                  storageBucket: "pizarra-colaborativa-ce80e.firebasestorage.app",
+                  messagingSenderId: "27641632737",
+                  appId: "1:27641632737:web:9c2b37812f71c11334e4a0",
+                  measurementId: "G-DXGPX7Z7FQ"
+                };
 
+                let firebaseConfig = firebaseConfigManual;
+
+                // Si se proporcionan variables globales del entorno, úsalas para mayor flexibilidad
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                }
+
+                if (!firebaseConfig) {
+                    console.error("Firebase config is missing. Please provide it in the code.");
+                    showMessage("Error: No se encontró la configuración de Firebase.", "error");
+                    return;
+                }
+
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                 const app = initializeApp(firebaseConfig);
                 window.db = getFirestore(app);
                 window.auth = getAuth(app);
                 window.appId = appId;
                 
-                if (initialAuthToken) {
-                    await signInWithCustomToken(window.auth, initialAuthToken);
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(window.auth, __initial_auth_token);
                 } else {
                     await signInAnonymously(window.auth);
                 }
                 
                 console.log("Firebase setup complete.");
 
-                // Listen for auth state changes and initialize the app
                 onAuthStateChanged(window.auth, (user) => {
                     if (user) {
                         window.userId = user.uid;
@@ -131,7 +150,7 @@
         
         // Expose Firebase functions to the global scope
         window.firebaseExports = {
-            onSnapshot, collection, addDoc, doc, deleteDoc
+            onSnapshot, collection, addDoc, doc, deleteDoc, getDocs, writeBatch
         };
     </script>
 </head>
@@ -162,7 +181,7 @@
         <p id="messageText"></p>
     </div>
     <script type="module">
-        const { onSnapshot, collection, addDoc, doc, deleteDoc } = window.firebaseExports;
+        const { onSnapshot, collection, addDoc, doc, deleteDoc, getDocs, writeBatch } = window.firebaseExports;
         
         window.initializeApp = function() {
             const db = window.db;
@@ -309,14 +328,16 @@
             // Handle clearing the canvas
             clearBtn.addEventListener('click', async () => {
                 try {
-                    // This is for demonstration, in a real app, you might only want to let the "owner" clear.
-                    // For this public board, anyone can clear it.
-                    const docs = await getDocs(drawingDataRef);
+                    // Obtiene todos los documentos en la colección
+                    const querySnapshot = await getDocs(drawingDataRef);
+                    // Crea una escritura por lotes para eliminar todos los documentos de forma eficiente
                     const batch = writeBatch(db);
-                    docs.forEach(d => batch.delete(d.ref));
+                    querySnapshot.forEach(d => {
+                        batch.delete(d.ref);
+                    });
+                    // Confirma la escritura por lotes
                     await batch.commit();
-                    // Or a simpler but less efficient way:
-                    // docs.forEach(d => deleteDoc(d.ref));
+
                     showMessage("Pizarra borrada.", "success");
                 } catch (error) {
                     console.error("Error al borrar la pizarra:", error);
