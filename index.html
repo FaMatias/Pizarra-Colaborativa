@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pizarra Colaborativa</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #111827; /* Dark background */
+            color: #d1d5db; /* Light text */
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1.5rem;
+            position: relative;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(167, 139, 250, 0.2) 0%, rgba(17, 24, 39, 0) 70%);
+            z-index: -1;
+        }
+
+        #canvas {
+            touch-action: none; /* Disable default touch actions */
+            background-color: #1f2937;
+            box-shadow: 0 10px 15px rgba(0,0,0,0.2);
+            border-radius: 1.5rem;
+            border: 2px solid #374151;
+        }
+
+        .message-box {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+
+        .color-option {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .color-option.active {
+            transform: scale(1.15);
+            border-color: #a78bfa;
+        }
+    </style>
+    <!-- Firebase Libraries -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, onSnapshot, collection, addDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // This function displays a temporary message box.
+        window.showMessage = function(text, type = 'info', duration = 3000) {
+            const messageBox = document.getElementById('messageBox');
+            const messageText = document.getElementById('messageText');
+            messageText.textContent = text;
+            messageBox.className = 'message-box p-4 rounded-xl shadow-lg';
+            if (type === 'error') {
+                messageBox.classList.add('bg-red-500', 'text-white');
+            } else if (type === 'success') {
+                messageBox.classList.add('bg-emerald-500', 'text-white');
+            } else {
+                messageBox.classList.add('bg-indigo-500', 'text-white');
+            }
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, duration);
+        }
+
+        // Setup Firebase connection and authentication.
+        async function setupFirebase() {
+            try {
+                // Use global variables provided by the environment
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                const app = initializeApp(firebaseConfig);
+                window.db = getFirestore(app);
+                window.auth = getAuth(app);
+                window.appId = appId;
+                
+                if (initialAuthToken) {
+                    await signInWithCustomToken(window.auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(window.auth);
+                }
+                
+                console.log("Firebase setup complete.");
+
+                // Listen for auth state changes and initialize the app
+                onAuthStateChanged(window.auth, (user) => {
+                    if (user) {
+                        window.userId = user.uid;
+                        document.getElementById('user-id-display').textContent = window.userId;
+                        console.log("User is signed in with UID:", window.userId);
+                        window.initializeApp();
+                    } else {
+                        console.log("No user is signed in.");
+                        document.getElementById('user-id-display').textContent = 'N/A';
+                    }
+                });
+            } catch (e) {
+                console.error("Error setting up Firebase:", e);
+                window.showMessage("Error al inicializar la base de datos. Por favor, recarga la página.", "error");
+            }
+        }
+        
+        window.addEventListener('load', setupFirebase);
+        
+        // Expose Firebase functions to the global scope
+        window.firebaseExports = {
+            onSnapshot, collection, addDoc, doc, deleteDoc
+        };
+    </script>
+</head>
+<body class="p-4 flex flex-col items-center justify-start min-h-screen relative">
+    <div class="flex flex-col items-center text-center p-6 bg-gray-800 rounded-3xl shadow-2xl w-full max-w-5xl mx-auto mb-6 z-10 border border-gray-700">
+        <h1 class="text-4xl font-extrabold text-white mb-2">Pizarra Colaborativa</h1>
+        <p class="text-sm text-gray-500 mb-4">
+            ID de Usuario: <span id="user-id-display" class="font-mono text-xs text-gray-400">Cargando...</span>
+        </p>
+        <div class="flex items-center justify-center space-x-4">
+            <label class="text-gray-400 font-medium">Color:</label>
+            <div id="color-picker" class="flex space-x-2">
+                <div class="color-option bg-violet-500 active" data-color="#8b5cf6"></div>
+                <div class="color-option bg-emerald-500" data-color="#10b981"></div>
+                <div class="color-option bg-red-500" data-color="#ef4444"></div>
+                <div class="color-option bg-yellow-500" data-color="#eab308"></div>
+                <div class="color-option bg-white" data-color="#ffffff"></div>
+            </div>
+            <button id="clearBtn" class="bg-gray-700 text-white font-bold py-2 px-4 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105 hover:bg-gray-600">
+                Borrar
+            </button>
+        </div>
+    </div>
+    
+    <canvas id="canvas" class="w-full max-w-5xl h-[60vh] md:h-[70vh]"></canvas>
+    
+    <div id="messageBox" class="message-box bg-red-500 text-white p-4 rounded-xl shadow-lg">
+        <p id="messageText"></p>
+    </div>
+    <script type="module">
+        const { onSnapshot, collection, addDoc, doc, deleteDoc } = window.firebaseExports;
+        
+        window.initializeApp = function() {
+            const db = window.db;
+            const userId = window.userId;
+            const appId = window.appId;
+
+            if (!db || !userId) {
+                console.error("Database or User ID not available.");
+                return;
+            }
+
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const clearBtn = document.getElementById('clearBtn');
+            const colorPicker = document.getElementById('color-picker');
+
+            let drawing = false;
+            let currentLine = [];
+            let currentColor = '#8b5cf6';
+            const drawingDataRef = collection(db, `artifacts/${appId}/public/data/drawings`);
+            
+            // Set up canvas dimensions to be responsive
+            function resizeCanvas() {
+                canvas.width = canvas.parentElement.offsetWidth;
+                canvas.height = canvas.parentElement.offsetHeight;
+                redrawCanvas();
+            }
+
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            // Set drawing style
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            // Function to draw a line segment
+            function drawLine(line, color) {
+                ctx.strokeStyle = color;
+                ctx.beginPath();
+                ctx.moveTo(line[0].x, line[0].y);
+                for (let i = 1; i < line.length; i++) {
+                    ctx.lineTo(line[i].x, line[i].y);
+                }
+                ctx.stroke();
+            }
+
+            // Function to redraw the entire canvas from Firestore data
+            function redrawCanvas() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // The `onSnapshot` listener handles the drawing logic, so we just clear here.
+            }
+
+            // Get canvas coordinates relative to the canvas element
+            function getCoords(e) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const clientX = e.clientX || e.touches[0].clientX;
+                const clientY = e.clientY || e.touches[0].clientY;
+                return {
+                    x: (clientX - rect.left) * scaleX,
+                    y: (clientY - rect.top) * scaleY
+                };
+            }
+
+            // Mouse and touch event listeners for drawing
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+            canvas.addEventListener('mousemove', draw);
+            
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                startDrawing(e.touches[0]);
+            });
+            canvas.addEventListener('touchend', stopDrawing);
+            canvas.addEventListener('touchcancel', stopDrawing);
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                draw(e.touches[0]);
+            });
+
+            function startDrawing(e) {
+                drawing = true;
+                currentLine = [];
+                const coords = getCoords(e);
+                currentLine.push(coords);
+            }
+
+            async function stopDrawing() {
+                if (!drawing) return;
+                drawing = false;
+                if (currentLine.length > 1) {
+                    try {
+                        await addDoc(drawingDataRef, {
+                            line: currentLine,
+                            color: currentColor,
+                            userId: userId
+                        });
+                    } catch (error) {
+                        console.error("Error al guardar la línea:", error);
+                        showMessage("Error al guardar el dibujo.", "error");
+                    }
+                }
+                currentLine = [];
+            }
+
+            function draw(e) {
+                if (!drawing) return;
+                const coords = getCoords(e);
+                currentLine.push(coords);
+                // Draw locally for immediate feedback
+                drawLine(currentLine, currentColor);
+            }
+
+            // Listen for real-time updates from Firestore
+            onSnapshot(drawingDataRef, (snapshot) => {
+                const lines = [];
+                snapshot.forEach(doc => {
+                    lines.push(doc.data());
+                });
+                
+                // Clear the canvas and redraw all lines
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                lines.forEach(lineData => {
+                    drawLine(lineData.line, lineData.color);
+                });
+            }, (error) => {
+                console.error("Error fetching drawing data:", error);
+                showMessage("Error al cargar la pizarra. Por favor, recarga.", "error");
+            });
+
+            // Handle color selection
+            colorPicker.addEventListener('click', (e) => {
+                const colorElement = e.target.closest('.color-option');
+                if (colorElement) {
+                    document.querySelector('.color-option.active').classList.remove('active');
+                    colorElement.classList.add('active');
+                    currentColor = colorElement.dataset.color;
+                }
+            });
+
+            // Handle clearing the canvas
+            clearBtn.addEventListener('click', async () => {
+                try {
+                    // This is for demonstration, in a real app, you might only want to let the "owner" clear.
+                    // For this public board, anyone can clear it.
+                    const docs = await getDocs(drawingDataRef);
+                    const batch = writeBatch(db);
+                    docs.forEach(d => batch.delete(d.ref));
+                    await batch.commit();
+                    // Or a simpler but less efficient way:
+                    // docs.forEach(d => deleteDoc(d.ref));
+                    showMessage("Pizarra borrada.", "success");
+                } catch (error) {
+                    console.error("Error al borrar la pizarra:", error);
+                    showMessage("Hubo un error al borrar la pizarra.", "error");
+                }
+            });
+        };
+    </script>
+</body>
+</html>
